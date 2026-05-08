@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Optimizador de Cortes</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <!-- LOGIN -->
+  <div id="login">
+    <h2>Login</h2>
+    <input type="text" id="usuario" placeholder="Usuario">
+    <input type="password" id="password" placeholder="Contraseña">
+    <button onclick="login()">Ingresar</button>
+  </div>
+
+  <!-- PLATAFORMA -->
+  <div id="plataforma" style="display:none;">
+    <h2>Proyecto</h2>
+    <input type="text" id="nombreProyecto" placeholder="Nombre del proyecto">
+
+    <h3>Modelo de ventana</h3>
+    <select id="modeloVentana" onchange="mostrarPerfiles()">
+      <option value="">Seleccione...</option>
+      <option value="corrediza2">Ventana Corrediza 2 Hojas</option>
+    </select>
+
+    <div id="perfiles"></div>
+    <button onclick="optimizar()">Optimizar cortes</button>
+    <canvas id="grafico"></canvas>
+    <button onclick="exportarPDF()">Exportar PDF</button>
+  </div>
+
+<script>
+const desperdicio = 5; // mm por corte
+const longitudTira = 6000; // longitud estándar de cada tira
+
+function login() {
+  const user = document.getElementById("usuario").value;
+  const pass = document.getElementById("password").value;
+  if(user && pass) {
+    document.getElementById("login").style.display = "none";
+    document.getElementById("plataforma").style.display = "block";
+  }
+}
+
+function mostrarPerfiles() {
+  const modelo = document.getElementById("modeloVentana").value;
+  const perfilesDiv = document.getElementById("perfiles");
+  perfilesDiv.innerHTML = "";
+  if(modelo === "corrediza2") {
+    perfilesDiv.innerHTML = `
+      <label>MTG2175: <input type="number" id="MTG2175"></label><br>
+      <label>MTG2177: <input type="number" id="MTG2177"></label><br>
+      <label>MTG2176: <input type="number" id="MTG2176"></label><br>
+    `;
+  }
+}
+
+function optimizar() {
+  // Recoger medidas ingresadas
+  const piezas = [];
+  ["MTG2175","MTG2177","MTG2176"].forEach(id => {
+    const val = parseInt(document.getElementById(id)?.value || 0);
+    if(val > 0) piezas.push({id, medida: val});
+  });
+
+  // Ordenar piezas de mayor a menor
+  piezas.sort((a, b) => b.medida - a.medida);
+
+  let tiras = [];
+
+  piezas.forEach(pieza => {
+    let colocada = false;
+    for (let tira of tiras) {
+      const espacioUsado = tira.reduce((sum, p) => sum + p.medida + desperdicio, 0);
+      if (espacioUsado + pieza.medida <= longitudTira) {
+        tira.push(pieza);
+        colocada = true;
+        break;
+      }
+    }
+    if (!colocada) {
+      tiras.push([pieza]);
+    }
+  });
+
+  // Mostrar gráfico
+  const ctx = document.getElementById("grafico").getContext("2d");
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: tiras.map((_, i) => `Tira ${i+1}`),
+      datasets: [{
+        label: 'Uso de tiras (mm)',
+        data: tiras.map(tira => tira.reduce((sum, p) => sum + p.medida + desperdicio, 0)),
+        backgroundColor: 'steelblue'
+      }]
+    }
+  });
+
+  // Guardar resultado global
+  window.resultadoOptimizacion = tiras;
+}
+
+function exportarPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.text("Reporte de cortes optimizados", 10, 10);
+
+  if(window.resultadoOptimizacion) {
+    window.resultadoOptimizacion.forEach((tira, i) => {
+      doc.text(`Tira ${i+1}:`, 10, 20 + i*10);
+      tira.forEach(p => doc.text(` - ${p.id}: ${p.medida} mm`, 30, 20 + i*10));
+    });
+  }
+
+  doc.save("cortes.pdf");
+}
+</script>
+</body>
+</html>
