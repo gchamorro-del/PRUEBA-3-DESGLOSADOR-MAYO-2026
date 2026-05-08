@@ -20,13 +20,10 @@
     <h2>Proyecto</h2>
     <input type="text" id="nombreProyecto" placeholder="Nombre del proyecto">
 
-    <h3>Modelo de ventana</h3>
-    <select id="modeloVentana" onchange="mostrarPerfiles()">
-      <option value="">Seleccione...</option>
-      <option value="corrediza2">Ventana Corrediza 2 Hojas</option>
-    </select>
-
-    <div id="perfiles"></div>
+    <h3>Ventanas</h3>
+    <div id="ventanas"></div>
+    <button onclick="agregarVentana()">Agregar ventana</button>
+    <br><br>
     <button onclick="optimizar()">Optimizar cortes</button>
     <canvas id="grafico"></canvas>
     <button onclick="exportarPDF()">Exportar PDF</button>
@@ -34,7 +31,8 @@
 
 <script>
 const desperdicio = 5; // mm por corte
-const longitudTira = 6000; // longitud estándar de cada tira
+let contadorVentanas = 0;
+let resultadoOptimizacion = {};
 
 function login() {
   const user = document.getElementById("usuario").value;
@@ -45,63 +43,100 @@ function login() {
   }
 }
 
-function mostrarPerfiles() {
-  const modelo = document.getElementById("modeloVentana").value;
-  const perfilesDiv = document.getElementById("perfiles");
+function agregarVentana() {
+  contadorVentanas++;
+  const div = document.createElement("div");
+  div.id = "ventana" + contadorVentanas;
+  div.innerHTML = `
+    <h3>Ventana ${contadorVentanas}</h3>
+    <label>ID: <input type="text" id="id${contadorVentanas}" placeholder="V${contadorVentanas}"></label><br>
+    <label>Ancho: <input type="number" id="ancho${contadorVentanas}"></label><br>
+    <label>Alto: <input type="number" id="alto${contadorVentanas}"></label><br>
+    <select id="modelo${contadorVentanas}" onchange="mostrarPerfiles(${contadorVentanas})">
+      <option value="">Seleccione modelo...</option>
+      <option value="corrediza2">Ventana Corrediza 2 Hojas</option>
+    </select>
+    <div id="perfiles${contadorVentanas}"></div>
+    <hr>
+  `;
+  document.getElementById("ventanas").appendChild(div);
+}
+
+function mostrarPerfiles(num) {
+  const modelo = document.getElementById("modelo"+num).value;
+  const perfilesDiv = document.getElementById("perfiles"+num);
   perfilesDiv.innerHTML = "";
   if(modelo === "corrediza2") {
     perfilesDiv.innerHTML = `
-      <label>MTG2175: <input type="number" id="MTG2175"></label><br>
-      <label>MTG2177: <input type="number" id="MTG2177"></label><br>
-      <label>MTG2176: <input type="number" id="MTG2176"></label><br>
+      <label>MTG2175 (longitud disponible mm): <input type="number" id="MTG2175_${num}"></label><br>
+      <label>MTG2177 (longitud disponible mm): <input type="number" id="MTG2177_${num}"></label><br>
+      <label>MTG2176 (longitud disponible mm): <input type="number" id="MTG2176_${num}"></label><br>
     `;
   }
 }
 
 function optimizar() {
-  // Recoger medidas ingresadas
-  const piezas = [];
-  ["MTG2175","MTG2177","MTG2176"].forEach(id => {
-    const val = parseInt(document.getElementById(id)?.value || 0);
-    if(val > 0) piezas.push({id, medida: val});
-  });
+  let tirasPorPerfil = {};
 
-  // Ordenar piezas de mayor a menor
-  piezas.sort((a, b) => b.medida - a.medida);
-
-  let tiras = [];
-
-  piezas.forEach(pieza => {
-    let colocada = false;
-    for (let tira of tiras) {
-      const espacioUsado = tira.reduce((sum, p) => sum + p.medida + desperdicio, 0);
-      if (espacioUsado + pieza.medida <= longitudTira) {
-        tira.push(pieza);
-        colocada = true;
-        break;
+  for(let i=1; i<=contadorVentanas; i++) {
+    ["MTG2175","MTG2177","MTG2176"].forEach(id => {
+      const longitud = parseInt(document.getElementById(id+"_"+i)?.value || 0);
+      if(longitud > 0) {
+        if(!tirasPorPerfil[id]) tirasPorPerfil[id] = {longitud: longitud, piezas: []};
+        // Ejemplo: cada ventana genera piezas ficticias según ancho/alto
+        const ancho = parseInt(document.getElementById("ancho"+i)?.value || 0);
+        const alto = parseInt(document.getElementById("alto"+i)?.value || 0);
+        if(ancho > 0) tirasPorPerfil[id].piezas.push({id: id+"-V"+i+"-A", medida: ancho});
+        if(alto > 0) tirasPorPerfil[id].piezas.push({id: id+"-V"+i+"-H", medida: alto});
       }
-    }
-    if (!colocada) {
-      tiras.push([pieza]);
-    }
-  });
+    });
+  }
 
-  // Mostrar gráfico
+  resultadoOptimizacion = {};
+  for(const perfil in tirasPorPerfil) {
+    const longitudTira = tirasPorPerfil[perfil].longitud;
+    const piezas = tirasPorPerfil[perfil].piezas.sort((a,b)=>b.medida-a.medida);
+    let tiras = [];
+
+    piezas.forEach(pieza => {
+      let colocada = false;
+      for (let tira of tiras) {
+        const espacioUsado = tira.reduce((sum, p) => sum + p.medida + desperdicio, 0);
+        if (espacioUsado + pieza.medida <= longitudTira) {
+          tira.push(pieza);
+          colocada = true;
+          break;
+        }
+      }
+      if (!colocada) tiras.push([pieza]);
+    });
+
+    resultadoOptimizacion[perfil] = {tiras, longitud: longitudTira};
+  }
+
+  // Gráfico horizontal
   const ctx = document.getElementById("grafico").getContext("2d");
+  const labels = [];
+  const data = [];
+  for(const perfil in resultadoOptimizacion) {
+    resultadoOptimizacion[perfil].tiras.forEach((tira, i) => {
+      labels.push(`${perfil} - Tira ${i+1}`);
+      data.push(tira.reduce((sum, p) => sum + p.medida + desperdicio, 0));
+    });
+  }
+
   new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: tiras.map((_, i) => `Tira ${i+1}`),
+      labels: labels,
       datasets: [{
         label: 'Uso de tiras (mm)',
-        data: tiras.map(tira => tira.reduce((sum, p) => sum + p.medida + desperdicio, 0)),
+        data: data,
         backgroundColor: 'steelblue'
       }]
-    }
+    },
+    options: { indexAxis: 'y' }
   });
-
-  // Guardar resultado global
-  window.resultadoOptimizacion = tiras;
 }
 
 function exportarPDF() {
@@ -109,12 +144,27 @@ function exportarPDF() {
   const doc = new jsPDF();
   doc.text("Reporte de cortes optimizados", 10, 10);
 
-  if(window.resultadoOptimizacion) {
-    window.resultadoOptimizacion.forEach((tira, i) => {
-      doc.text(`Tira ${i+1}:`, 10, 20 + i*10);
-      tira.forEach(p => doc.text(` - ${p.id}: ${p.medida} mm`, 30, 20 + i*10));
+  let y = 20;
+  for(const perfil in resultadoOptimizacion) {
+    doc.text(`Perfil ${perfil} (longitud disponible: ${resultadoOptimizacion[perfil].longitud} mm)`, 10, y);
+    y += 10;
+    resultadoOptimizacion[perfil].tiras.forEach((tira, i) => {
+      const usado = tira.reduce((sum, p) => sum + p.medida + desperdicio, 0);
+      const eficiencia = ((usado/resultadoOptimizacion[perfil].longitud)*100).toFixed(2);
+      doc.text(`Tira ${i+1} - Uso: ${usado} mm (${eficiencia}% aprovechamiento)`, 15, y);
+      y += 10;
+      tira.forEach(p => {
+        doc.text(` - ${p.id}: ${p.medida} mm`, 25, y);
+        y += 10;
+      });
     });
+    y += 10;
   }
+
+  // Exportar gráfico como imagen
+  const canvas = document.getElementById("grafico");
+  const imgData = canvas.toDataURL("image/png");
+  doc.addImage(imgData, 'PNG', 10, y, 180, 100);
 
   doc.save("cortes.pdf");
 }
